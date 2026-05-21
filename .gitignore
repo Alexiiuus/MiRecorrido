@@ -29,6 +29,12 @@ backend/app/db/*.gtfs
 *.log
 logs/
 
+# Node / Expo (frontend)
+node_modules/
+.expo/
+dist/
+web-build/
+
 # OS files
 .DS_Store
 Thumbs.db

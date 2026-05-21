@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import text, Table, insert
-from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))  # backend/
 

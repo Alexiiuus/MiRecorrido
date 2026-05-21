@@ -5,8 +5,3 @@ export async function fetchRoutes(): Promise<Route[]> {
   const response = await apiClient.get<Route[]>("/routes");
   return response.data;
 }
-
-export async function fetchRouteDetail(routeId: string): Promise<Route> {
-  const response = await apiClient.get<Route>(`/routes/${routeId}`);
-  return response.data;
-}

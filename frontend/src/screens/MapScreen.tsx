@@ -58,7 +58,6 @@ export default function MapScreen({ route: navRoute }: MapScreenProps) {
     currentLocation,
     heading,
     error: locationError,
-    tracking,
     startTracking,
     stopTracking,
   } = useCurrentLocation();
