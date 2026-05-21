@@ -7,12 +7,14 @@ interface NearestStopsPanelProps {
   stops: NearestStop[];
   loading: boolean;
   error: string | null;
+  guideHint?: "guide" | "nearby";
 }
 
 export default function NearestStopsPanel({
   stops,
   loading,
   error,
+  guideHint,
 }: NearestStopsPanelProps) {
   if (loading) {
     return (
@@ -62,6 +64,16 @@ export default function NearestStopsPanel({
           <Text style={styles.distance}>{formatDistance(stop.distance_meters)}</Text>
         </View>
       ))}
+      {guideHint === "guide" && (
+        <Text style={styles.guideText}>
+          Seguí la línea guía para llegar a la parada.
+        </Text>
+      )}
+      {guideHint === "nearby" && (
+        <Text style={styles.nearbyText}>
+          Estás cerca de la parada más próxima.
+        </Text>
+      )}
     </View>
   );
 }
@@ -138,5 +150,19 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#007AFF",
     marginLeft: 8,
+  },
+  guideText: {
+    marginTop: 10,
+    fontSize: 13,
+    color: "#FF9500",
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  nearbyText: {
+    marginTop: 10,
+    fontSize: 13,
+    color: "#34C759",
+    fontWeight: "600",
+    textAlign: "center",
   },
 });

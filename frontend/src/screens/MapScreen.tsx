@@ -18,11 +18,24 @@ import { getLatitude, getLongitude, isValidCoordinate } from "../utils/coordinat
 import { haversineDistanceMeters } from "../utils/distanceUtils";
 import { classifyStop, sortStopsBySequence } from "../utils/stopUtils";
 import { getNearestHighlightType } from "../utils/nearestStopUtils";
+import {
+  shouldShowGuideToNearestStop,
+  getGuideToNearestStopCoordinates,
+  NEAREST_STOP_GUIDE_THRESHOLD_METERS,
+} from "../utils/routeGuideUtils";
 import useCurrentLocation from "../hooks/useCurrentLocation";
 import LoadingState from "../components/LoadingState";
 import NearestStopsPanel from "../components/NearestStopsPanel";
 import StopTimesPanel from "../components/StopTimesPanel";
 import StopMarker from "../components/StopMarker";
+import { getWalkingRoute } from "../api/routing.api";
+import { WalkingRouteResponse } from "../types/routing";
+import {
+  shouldShowAccessRoute,
+  ACCESS_ROUTE_THRESHOLD_METERS,
+  ACCESS_ROUTE_MIN_REFRESH_DISTANCE_METERS,
+  ACCESS_ROUTE_MIN_REFRESH_TIME_MS,
+} from "../utils/routeProximityUtils";
 
 interface MapScreenProps {
   navigation: any;
@@ -72,6 +85,11 @@ export default function MapScreen({ route: navRoute }: MapScreenProps) {
   const [nearestStopsLoading, setNearestStopsLoading] = useState(false);
   const [nearestStopsError, setNearestStopsError] = useState<string | null>(null);
   const lastQueryRef = useRef<{ lat: number; lon: number; time: number } | null>(null);
+
+  const [accessRoute, setAccessRoute] = useState<WalkingRouteResponse | null>(null);
+  const [accessRouteLoading, setAccessRouteLoading] = useState(false);
+  const [accessRouteError, setAccessRouteError] = useState<string | null>(null);
+  const lastAccessRouteRef = useRef<{ lat: number; lon: number; time: number; stopLat: number; stopLon: number } | null>(null);
 
   useEffect(() => {
     loadMapData();
@@ -125,6 +143,66 @@ export default function MapScreen({ route: navRoute }: MapScreenProps) {
     fetchNearestStops(currentLocation.latitude, currentLocation.longitude);
   }, [gpsMode, currentLocation]);
 
+  useEffect(() => {
+    if (!gpsMode || !currentLocation) {
+      setAccessRoute(null);
+      setAccessRouteError(null);
+      return;
+    }
+
+    const nearestStop = nearestStops[0];
+    const distanceMeters = nearestStop?.distance_meters ?? null;
+
+    if (!shouldShowAccessRoute({ distanceToNearestStopMeters: distanceMeters })) {
+      setAccessRoute(null);
+      setAccessRouteError(null);
+      return;
+    }
+
+    if (!nearestStop) return;
+    const stopLat = getLatitude(nearestStop);
+    const stopLon = getLongitude(nearestStop);
+    if (!Number.isFinite(stopLat) || !Number.isFinite(stopLon)) return;
+
+    const now = Date.now();
+    const last = lastAccessRouteRef.current;
+
+    if (last) {
+      const distFromLastQuery = haversineDistanceMeters(
+        currentLocation.latitude,
+        currentLocation.longitude,
+        last.lat,
+        last.lon
+      );
+      const stopChanged =
+        Math.abs(last.stopLat - stopLat) > 0.00001 ||
+        Math.abs(last.stopLon - stopLon) > 0.00001;
+
+      if (
+        !stopChanged &&
+        now - last.time < ACCESS_ROUTE_MIN_REFRESH_TIME_MS &&
+        distFromLastQuery < ACCESS_ROUTE_MIN_REFRESH_DISTANCE_METERS
+      ) {
+        return;
+      }
+    }
+
+    lastAccessRouteRef.current = {
+      lat: currentLocation.latitude,
+      lon: currentLocation.longitude,
+      time: now,
+      stopLat,
+      stopLon,
+    };
+
+    fetchAccessRoute(
+      currentLocation.latitude,
+      currentLocation.longitude,
+      stopLat,
+      stopLon
+    );
+  }, [gpsMode, currentLocation, nearestStops]);
+
   async function fetchNearestStops(lat: number, lon: number) {
     setNearestStopsLoading(true);
     setNearestStopsError(null);
@@ -143,6 +221,31 @@ export default function MapScreen({ route: navRoute }: MapScreenProps) {
       }
     } finally {
       setNearestStopsLoading(false);
+    }
+  }
+
+  async function fetchAccessRoute(
+    fromLat: number,
+    fromLon: number,
+    toLat: number,
+    toLon: number
+  ) {
+    setAccessRouteLoading(true);
+    setAccessRouteError(null);
+
+    try {
+      const data = await getWalkingRoute({
+        fromLat,
+        fromLon,
+        toLat,
+        toLon,
+      });
+      setAccessRoute(data);
+    } catch {
+      setAccessRouteError("No se pudo calcular la ruta hacia la parada.");
+      setAccessRoute(null);
+    } finally {
+      setAccessRouteLoading(false);
     }
   }
 
@@ -251,6 +354,34 @@ export default function MapScreen({ route: navRoute }: MapScreenProps) {
     }))
     .filter((c) => isValidCoordinate(c.latitude, c.longitude));
 
+  const nearestStop = nearestStops[0] ?? null;
+  const nearestStopDistance = nearestStop?.distance_meters ?? null;
+
+  const accessRouteCoords = accessRoute?.geometry ?? [];
+  const hasAccessRoute =
+    accessRouteCoords.length > 0 && !accessRouteLoading;
+
+  const showGuide = shouldShowGuideToNearestStop({
+    isRouteModeActive: gpsMode,
+    currentLocation,
+    nearestStop,
+  });
+  const guideCoordinates =
+    showGuide &&
+    !hasAccessRoute &&
+    currentLocation &&
+    nearestStop
+      ? getGuideToNearestStopCoordinates({ currentLocation, nearestStop })
+      : [];
+
+  let guideHint: "guide" | "nearby" | undefined;
+  if (gpsMode && nearestStopDistance !== null) {
+    guideHint =
+      nearestStopDistance > NEAREST_STOP_GUIDE_THRESHOLD_METERS
+        ? "guide"
+        : "nearby";
+  }
+
   return (
     <View style={styles.container}>
       <MapView
@@ -274,6 +405,27 @@ export default function MapScreen({ route: navRoute }: MapScreenProps) {
             coordinates={polylineCoords}
             strokeColor="#007AFF"
             strokeWidth={4}
+          />
+        )}
+
+        {hasAccessRoute && (
+          <Polyline
+            coordinates={accessRouteCoords.map((p) => ({
+              latitude: p.lat,
+              longitude: p.lon,
+            }))}
+            strokeWidth={5}
+            strokeColor="#34C759"
+            lineDashPattern={[10, 6]}
+          />
+        )}
+
+        {guideCoordinates.length === 2 && (
+          <Polyline
+            coordinates={guideCoordinates}
+            strokeWidth={3}
+            strokeColor="#FF9500"
+            lineDashPattern={[8, 8]}
           />
         )}
 
@@ -311,11 +463,47 @@ export default function MapScreen({ route: navRoute }: MapScreenProps) {
       )}
 
       {gpsMode && !selectedStop && (
-        <NearestStopsPanel
-          stops={nearestStops}
-          loading={nearestStopsLoading}
-          error={nearestStopsError}
-        />
+        <View>
+          <NearestStopsPanel
+            stops={nearestStops}
+            loading={nearestStopsLoading}
+            error={nearestStopsError}
+            guideHint={guideHint}
+          />
+          {hasAccessRoute && !selectedStop && accessRoute && (
+            <View style={styles.accessRouteInfo}>
+              <Text style={styles.accessRouteTitle}>
+                Ruta hacia parada más cercana
+              </Text>
+              <View style={styles.accessRouteRow}>
+                {accessRoute.distance_meters != null && (
+                  <Text style={styles.accessRouteDetail}>
+                    Distancia: {Math.round(accessRoute.distance_meters)} m
+                  </Text>
+                )}
+                {accessRoute.duration_seconds != null && (
+                  <Text style={styles.accessRouteDetail}>
+                    Tiempo estimado: {Math.round(accessRoute.duration_seconds / 60)} min
+                  </Text>
+                )}
+              </View>
+            </View>
+          )}
+          {accessRouteLoading && !selectedStop && (
+            <View style={styles.accessRouteInfo}>
+              <Text style={styles.accessRouteDetail}>
+                Calculando ruta hacia la parada...
+              </Text>
+            </View>
+          )}
+          {accessRouteError && !hasAccessRoute && !selectedStop && (
+            <View style={styles.accessRouteInfo}>
+              <Text style={styles.accessRouteErrorText}>
+                {accessRouteError}
+              </Text>
+            </View>
+          )}
+        </View>
       )}
 
       {selectedStop && (
@@ -376,5 +564,30 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 13,
     textAlign: "center",
+  },
+  accessRouteInfo: {
+    backgroundColor: "#fff",
+    borderTopWidth: 0.5,
+    borderTopColor: "#eee",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  accessRouteTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#34C759",
+    marginBottom: 4,
+  },
+  accessRouteRow: {
+    flexDirection: "row",
+    gap: 16,
+  },
+  accessRouteDetail: {
+    fontSize: 13,
+    color: "#666",
+  },
+  accessRouteErrorText: {
+    fontSize: 13,
+    color: "#FF9500",
   },
 });
