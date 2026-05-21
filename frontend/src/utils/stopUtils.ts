@@ -1,4 +1,5 @@
 export type StopType = "start" | "end" | "middle";
+export type StopHighlightType = "nearest-1" | "nearest-2" | null;
 
 export function getStopSequence(stop: any, index: number): number {
   return Number(

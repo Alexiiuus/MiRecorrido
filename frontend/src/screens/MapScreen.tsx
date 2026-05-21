@@ -9,14 +9,18 @@ const buildingsOffStyle: MapStyleElement[] = [
     stylers: [{ visibility: "off" }],
   },
 ];
+import { NearestStop } from "../types/nearestStop";
 import { ShapePoint } from "../types/shape";
 import { StopResponse, StopTimeResponse } from "../types/stop";
-import { fetchShape, fetchStops } from "../api/patterns.api";
+import { fetchShape, fetchStops, getNearestStops } from "../api/patterns.api";
 import { fetchStopTimes } from "../api/stops.api";
 import { getLatitude, getLongitude, isValidCoordinate } from "../utils/coordinateUtils";
+import { haversineDistanceMeters } from "../utils/distanceUtils";
 import { classifyStop, sortStopsBySequence } from "../utils/stopUtils";
+import { getNearestHighlightType } from "../utils/nearestStopUtils";
 import useCurrentLocation from "../hooks/useCurrentLocation";
 import LoadingState from "../components/LoadingState";
+import NearestStopsPanel from "../components/NearestStopsPanel";
 import StopTimesPanel from "../components/StopTimesPanel";
 import StopMarker from "../components/StopMarker";
 
@@ -64,6 +68,11 @@ export default function MapScreen({ route: navRoute }: MapScreenProps) {
 
   const [gpsMode, setGpsMode] = useState(false);
 
+  const [nearestStops, setNearestStops] = useState<NearestStop[]>([]);
+  const [nearestStopsLoading, setNearestStopsLoading] = useState(false);
+  const [nearestStopsError, setNearestStopsError] = useState<string | null>(null);
+  const lastQueryRef = useRef<{ lat: number; lon: number; time: number } | null>(null);
+
   useEffect(() => {
     loadMapData();
     return () => {
@@ -87,6 +96,55 @@ export default function MapScreen({ route: navRoute }: MapScreenProps) {
       );
     }
   }, [gpsMode, currentLocation, heading]);
+
+  useEffect(() => {
+    if (!gpsMode || !currentLocation) return;
+
+    const now = Date.now();
+    const last = lastQueryRef.current;
+
+    if (
+      last &&
+      now - last.time < 5000 &&
+      haversineDistanceMeters(
+        currentLocation.latitude,
+        currentLocation.longitude,
+        last.lat,
+        last.lon
+      ) < 10
+    ) {
+      return;
+    }
+
+    lastQueryRef.current = {
+      lat: currentLocation.latitude,
+      lon: currentLocation.longitude,
+      time: now,
+    };
+
+    fetchNearestStops(currentLocation.latitude, currentLocation.longitude);
+  }, [gpsMode, currentLocation]);
+
+  async function fetchNearestStops(lat: number, lon: number) {
+    setNearestStopsLoading(true);
+    setNearestStopsError(null);
+
+    try {
+      const data = await getNearestStops(patternId, lat, lon, 2);
+      setNearestStops(data.nearest_stops || []);
+    } catch {
+      try {
+        const local = await import("../utils/nearestStops").then((m) =>
+          m.getNearestStopsFromList(stops, lat, lon, 2)
+        );
+        setNearestStops(local);
+      } catch {
+        setNearestStopsError("No se pudieron obtener las paradas cercanas.");
+      }
+    } finally {
+      setNearestStopsLoading(false);
+    }
+  }
 
   async function loadMapData() {
     try {
@@ -219,15 +277,22 @@ export default function MapScreen({ route: navRoute }: MapScreenProps) {
           />
         )}
 
-        {stops.map((stop, index) => (
-          <StopMarker
-            key={stop.stop_id}
-            stop={stop}
-            type={classifyStop(index, stops.length)}
-            isSelected={selectedStop?.stop_id === stop.stop_id}
-            onPress={() => handleStopPress(stop)}
-          />
-        ))}
+        {stops.map((stop, index) => {
+          const type = classifyStop(index, stops.length);
+          const highlightType = gpsMode
+            ? getNearestHighlightType(stop, nearestStops)
+            : null;
+          return (
+            <StopMarker
+              key={stop.stop_id}
+              stop={stop}
+              type={type}
+              highlightType={highlightType}
+              isSelected={selectedStop?.stop_id === stop.stop_id}
+              onPress={() => handleStopPress(stop)}
+            />
+          );
+        })}
       </MapView>
 
       <TouchableOpacity
@@ -243,6 +308,14 @@ export default function MapScreen({ route: navRoute }: MapScreenProps) {
         <View style={styles.locationBanner}>
           <Text style={styles.locationBannerText}>{locationError}</Text>
         </View>
+      )}
+
+      {gpsMode && !selectedStop && (
+        <NearestStopsPanel
+          stops={nearestStops}
+          loading={nearestStopsLoading}
+          error={nearestStopsError}
+        />
       )}
 
       {selectedStop && (

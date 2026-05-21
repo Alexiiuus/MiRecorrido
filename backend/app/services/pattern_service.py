@@ -6,10 +6,12 @@ from sqlalchemy.orm import Session
 from app.repositories.shape_repository import ShapeRepository
 from app.repositories.stop_repository import StopRepository
 from app.repositories.trip_repository import TripRepository
+from app.schemas.nearest_stop import NearestStopResponse, NearestStopsResponse, UserLocationResponse
 from app.schemas.pattern import PatternResponse
 from app.schemas.shape import ShapePointResponse, ShapeResponse
 from app.schemas.stop import StopResponse
 from app.services.calendar_service import get_active_service_ids
+from app.utils.geo import haversine_distance_meters
 
 
 def make_pattern_id(route_id: str, direction_id: int | None, shape_id: str | None, trip_id: str) -> str:
@@ -120,3 +122,49 @@ class PatternService:
             )
             for r in stop_rows
         ]
+
+    def get_nearest_stops(
+        self,
+        pattern_id: str,
+        lat: float,
+        lon: float,
+        limit: int = 2,
+    ) -> NearestStopsResponse | None:
+        parsed = parse_pattern_id(pattern_id)
+        if not parsed or not parsed["trip_id"]:
+            return None
+
+        trip_id = parsed["trip_id"]
+        stop_rows = self.stop_repo.get_by_stop_times(trip_id)
+        if not stop_rows:
+            return NearestStopsResponse(
+                pattern_id=pattern_id,
+                user_location=UserLocationResponse(lat=lat, lon=lon),
+                nearest_stops=[],
+            )
+
+        scored = []
+        for r in stop_rows:
+            d = haversine_distance_meters(lat, lon, r["lat"], r["lon"])
+            scored.append((d, r))
+
+        scored.sort(key=lambda x: x[0])
+
+        nearest = [
+            NearestStopResponse(
+                stop_id=r["stop_id"],
+                name=r["name"],
+                street_name=r["name"],
+                lat=r["lat"],
+                lon=r["lon"],
+                sequence=r["sequence"],
+                distance_meters=round(d, 1),
+            )
+            for d, r in scored[:limit]
+        ]
+
+        return NearestStopsResponse(
+            pattern_id=pattern_id,
+            user_location=UserLocationResponse(lat=lat, lon=lon),
+            nearest_stops=nearest,
+        )
