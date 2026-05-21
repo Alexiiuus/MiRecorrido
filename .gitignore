@@ -1,0 +1,66 @@
+# Python __pycache__ and bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables and secrets
+.env
+!.env.example
+*.key
+*.pem
+*.crt
+
+# Docker local overrides and volumes
+docker-compose.override.yml
+pgdata/
+postgres_data/
+
+# Local data and uploads
+backend/data/uploads/
+backend/app/db/*.zip
+backend/app/db/*.gtfs
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Session artifacts from AI assistants
+session-*.md
+
+# IDE/editor config (not shared)
+.idea/
+.vscode/
+*.code-workspace
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+# Test and tool caches (preventive)
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Local databases (preventive — not currently used)
+*.sqlite
+*.sqlite3
+*.db
+
+# Jupyter notebooks (preventive)
+.ipynb_checkpoints/
